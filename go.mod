@@ -1,4 +1,4 @@
-module github.com/exedev/ocfl-mount
+module github.com/srerickson/x-ocfl-mount
 
 go 1.24.4
 
