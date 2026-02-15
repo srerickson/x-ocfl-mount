@@ -25,12 +25,12 @@ import (
 
 // OCFLInventory represents the OCFL inventory.json structure
 type OCFLInventory struct {
-	ID              string                       `json:"id"`
-	Type            string                       `json:"type"`
-	DigestAlgorithm string                       `json:"digestAlgorithm"`
-	Head            string                       `json:"head"`
-	Manifest        map[string][]string          `json:"manifest"`
-	Versions        map[string]OCFLVersion       `json:"versions"`
+	ID              string                 `json:"id"`
+	Type            string                 `json:"type"`
+	DigestAlgorithm string                 `json:"digestAlgorithm"`
+	Head            string                 `json:"head"`
+	Manifest        map[string][]string    `json:"manifest"`
+	Versions        map[string]OCFLVersion `json:"versions"`
 }
 
 // OCFLVersion represents a version entry in the inventory
