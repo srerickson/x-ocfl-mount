@@ -205,6 +205,48 @@ func (s *S3Backend) GetObjectReader(ctx context.Context, key string) (io.ReadClo
 	return resp.Body, size, nil
 }
 
+// GetObjectRange fetches a byte range from S3
+func (s *S3Backend) GetObjectRange(ctx context.Context, key string, offset, length int64) ([]byte, error) {
+	fullKey := key
+	if s.prefix != "" {
+		fullKey = s.prefix + "/" + key
+	}
+
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)
+	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &s.bucket,
+		Key:    &fullKey,
+		Range:  &rangeHeader,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
+// HeadObject returns the size of an object
+func (s *S3Backend) HeadObject(ctx context.Context, key string) (int64, error) {
+	fullKey := key
+	if s.prefix != "" {
+		fullKey = s.prefix + "/" + key
+	}
+
+	resp, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &s.bucket,
+		Key:    &fullKey,
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	if resp.ContentLength != nil {
+		return *resp.ContentLength, nil
+	}
+	return 0, nil
+}
+
 // OCFLObject represents a mounted OCFL object
 type OCFLObject struct {
 	backend   *S3Backend
@@ -213,8 +255,6 @@ type OCFLObject struct {
 	inventory *OCFLInventory
 	// Map from logical path to content path (relative to object root)
 	files map[string]string
-	// Map from logical path to file size
-	sizes map[string]int64
 }
 
 func NewOCFLObject(ctx context.Context, backend *S3Backend, objectID, version string) (*OCFLObject, error) {
@@ -278,7 +318,6 @@ func NewOCFLObject(ctx context.Context, backend *S3Backend, objectID, version st
 		version:   version,
 		inventory: &inventory,
 		files:     files,
-		sizes:     make(map[string]int64),
 	}, nil
 }
 
@@ -347,8 +386,8 @@ var _ = (fs.NodeReader)((*OCFLFile)(nil))
 
 func (f *OCFLFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	if !f.sizeKnown {
-		// Fetch size from S3
-		_, size, err := f.obj.backend.GetObjectReader(ctx, f.contentPath)
+		// Fetch size from S3 using HEAD request
+		size, err := f.obj.backend.HeadObject(ctx, f.contentPath)
 		if err != nil {
 			log.Printf("Error getting size for %s: %v", f.contentPath, err)
 			return syscall.EIO
@@ -366,31 +405,14 @@ func (f *OCFLFile) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint3
 }
 
 func (f *OCFLFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	reader, _, err := f.obj.backend.GetObjectReader(ctx, f.contentPath)
+	// Use S3 range request for efficient random access
+	data, err := f.obj.backend.GetObjectRange(ctx, f.contentPath, off, int64(len(dest)))
 	if err != nil {
-		log.Printf("Error reading %s: %v", f.contentPath, err)
-		return nil, syscall.EIO
-	}
-	defer reader.Close()
-
-	// Skip to offset
-	if off > 0 {
-		if _, err := io.CopyN(io.Discard, reader, off); err != nil {
-			if err == io.EOF {
-				return fuse.ReadResultData(nil), 0
-			}
-			log.Printf("Error seeking %s: %v", f.contentPath, err)
-			return nil, syscall.EIO
-		}
-	}
-
-	n, err := reader.Read(dest)
-	if err != nil && err != io.EOF {
-		log.Printf("Error reading %s: %v", f.contentPath, err)
+		log.Printf("Error reading %s at offset %d: %v", f.contentPath, off, err)
 		return nil, syscall.EIO
 	}
 
-	return fuse.ReadResultData(dest[:n]), 0
+	return fuse.ReadResultData(data), 0
 }
 
 type OCFLFileHandle struct {
