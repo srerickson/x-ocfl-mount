@@ -1,5 +1,7 @@
 # ocfl-mount
 
+> **Note:** This is AI-generated code not intended for general use.
+
 A Go CLI tool that mounts an OCFL object from S3 as a read-only FUSE filesystem.
 
 ## Usage
