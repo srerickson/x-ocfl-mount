@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -44,11 +47,26 @@ type OCFLUser struct {
 	Address string `json:"address"`
 }
 
+// OCFLLayout represents the ocfl_layout.json structure
+type OCFLLayout struct {
+	Extension   string `json:"extension"`
+	Description string `json:"description"`
+}
+
+// HashAndIDNTupleConfig represents the 0003 extension config
+type HashAndIDNTupleConfig struct {
+	ExtensionName   string `json:"extensionName"`
+	DigestAlgorithm string `json:"digestAlgorithm"`
+	TupleSize       int    `json:"tupleSize"`
+	NumberOfTuples  int    `json:"numberOfTuples"`
+}
+
 // S3Backend handles S3 operations
 type S3Backend struct {
-	client *s3.Client
-	bucket string
-	prefix string
+	client       *s3.Client
+	bucket       string
+	prefix       string
+	layoutConfig *HashAndIDNTupleConfig
 }
 
 func NewS3Backend(ctx context.Context, bucketPrefix string) (*S3Backend, error) {
@@ -64,11 +82,87 @@ func NewS3Backend(ctx context.Context, bucketPrefix string) (*S3Backend, error) 
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 
-	return &S3Backend{
+	backend := &S3Backend{
 		client: s3.NewFromConfig(cfg),
 		bucket: bucket,
 		prefix: prefix,
-	}, nil
+	}
+
+	// Try to load layout configuration
+	if err := backend.loadLayoutConfig(ctx); err != nil {
+		log.Printf("Warning: could not load layout config: %v (using flat layout)", err)
+	}
+
+	return backend, nil
+}
+
+func (s *S3Backend) loadLayoutConfig(ctx context.Context) error {
+	// Read ocfl_layout.json
+	layoutData, err := s.GetObject(ctx, "ocfl_layout.json")
+	if err != nil {
+		return fmt.Errorf("reading ocfl_layout.json: %w", err)
+	}
+
+	var layout OCFLLayout
+	if err := json.Unmarshal(layoutData, &layout); err != nil {
+		return fmt.Errorf("parsing ocfl_layout.json: %w", err)
+	}
+
+	if layout.Extension == "0003-hash-and-id-n-tuple-storage-layout" {
+		// Read extension config
+		configPath := "extensions/0003-hash-and-id-n-tuple-storage-layout/config.json"
+		configData, err := s.GetObject(ctx, configPath)
+		if err != nil {
+			return fmt.Errorf("reading extension config: %w", err)
+		}
+
+		var config HashAndIDNTupleConfig
+		if err := json.Unmarshal(configData, &config); err != nil {
+			return fmt.Errorf("parsing extension config: %w", err)
+		}
+
+		s.layoutConfig = &config
+		log.Printf("Using 0003-hash-and-id-n-tuple-storage-layout: %s, tupleSize=%d, numberOfTuples=%d",
+			config.DigestAlgorithm, config.TupleSize, config.NumberOfTuples)
+	}
+
+	return nil
+}
+
+// ObjectPath returns the storage path for an object ID based on the layout
+func (s *S3Backend) ObjectPath(objectID string) string {
+	if s.layoutConfig == nil {
+		// Flat layout - use object ID directly
+		return objectID
+	}
+
+	// Hash the object ID
+	var hashHex string
+	switch s.layoutConfig.DigestAlgorithm {
+	case "sha256":
+		hash := sha256.Sum256([]byte(objectID))
+		hashHex = hex.EncodeToString(hash[:])
+	case "sha512":
+		hash := sha512.Sum512([]byte(objectID))
+		hashHex = hex.EncodeToString(hash[:])
+	default:
+		// Fall back to flat layout
+		return objectID
+	}
+
+	// Build tuple path
+	var parts []string
+	for i := 0; i < s.layoutConfig.NumberOfTuples; i++ {
+		start := i * s.layoutConfig.TupleSize
+		end := start + s.layoutConfig.TupleSize
+		if end > len(hashHex) {
+			break
+		}
+		parts = append(parts, hashHex[start:end])
+	}
+	parts = append(parts, objectID)
+
+	return strings.Join(parts, "/")
 }
 
 func (s *S3Backend) GetObject(ctx context.Context, key string) ([]byte, error) {
@@ -124,10 +218,9 @@ type OCFLObject struct {
 }
 
 func NewOCFLObject(ctx context.Context, backend *S3Backend, objectID, version string) (*OCFLObject, error) {
-	// OCFL object path is derived from the object ID
-	// For simplicity, we'll use the object ID directly as the path
-	// In practice, you might need pairtree or other path encoding
-	objectPath := objectID
+	// OCFL object path is derived from the object ID using the repository's layout
+	objectPath := backend.ObjectPath(objectID)
+	log.Printf("Object path for %q: %s", objectID, objectPath)
 
 	// Fetch the inventory
 	inventoryPath := objectPath + "/inventory.json"
