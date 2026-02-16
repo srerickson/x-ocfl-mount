@@ -54,7 +54,6 @@ fusermount -u /mnt/ocfl
 ## Features
 
 - Parses OCFL `inventory.json` to map logical paths → content paths
-- Supports `0003-hash-and-id-n-tuple-storage-layout` extension (auto-detected from `ocfl_layout.json`)
 - **S3 backend**: Uses AWS SDK v2 with efficient range requests for random access reads
 - **Local backend**: Direct filesystem reads with `ReadAt` for random access
 - go-fuse for filesystem implementation
