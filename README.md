@@ -6,7 +6,7 @@ A Go library and CLI tool that mounts an OCFL object as a read-only FUSE filesys
 
 ## Library Usage
 
-The `ocflfuse` package exports a single entry point, `NewRoot`, which resolves an OCFL object version and returns a FUSE root node:
+The `ocflfuse` package exports a single entry point, `NewObjectFS`, which resolves an OCFL object version and returns an `*ObjectFS`:
 
 ```go
 import (
@@ -14,11 +14,11 @@ import (
     "github.com/hanwen/go-fuse/v2/fs"
 )
 
-result, err := ocflfuse.NewRoot(ctx, "s3://bucket/prefix", "my-object-id", "v1")
-// result.Root is an fs.InodeEmbedder for use with fs.Mount
-// result.Info has metadata (ObjectID, Version, FileCount, etc.)
+objFS, err := ocflfuse.NewObjectFS(ctx, "s3://bucket/prefix", "my-object-id", "v1")
+// objFS.Root is an fs.InodeEmbedder for use with fs.Mount
+// objFS.Info has metadata (ObjectID, Version, FileCount, etc.)
 
-server, err := fs.Mount(mountpoint, result.Root, opts)
+server, err := fs.Mount(mountpoint, objFS.Root, opts)
 ```
 
 ## CLI Usage
