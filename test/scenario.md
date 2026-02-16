@@ -43,7 +43,14 @@ time duckdb -c "
 
 - **250 files** mounted from OCFL object
 - **30 distinct types**, **~25.3M total records**
-- **Query time: 2m 7s** (wall clock)
+- Query run 3 times with fresh mount + cache drop between each run
+
+| Run | Time |
+|-----|------|
+| 1 | 2m 02.3s |
+| 2 | 1m 54.2s |
+| 3 | 1m 51.2s |
+| **Average** | **1m 55.9s** |
 
 Top types by record count:
 

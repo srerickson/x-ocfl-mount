@@ -54,7 +54,14 @@ time duckdb -c "
 
 - **250 files** queried directly from S3
 - **30 distinct types**, **~25.3M total records** (identical to FUSE scenario)
-- **Query time: 2m 17s** (wall clock)
+- Query run 3 times
+
+| Run | Time |
+|-----|------|
+| 1 | 2m 02.4s |
+| 2 | 2m 03.2s |
+| 3 | 2m 05.3s |
+| **Average** | **2m 03.6s** |
 
 Top types by record count:
 
@@ -70,13 +77,3 @@ Top types by record count:
 | Editorial; Commentary | 598,970 |
 | Obituary | 314,692 |
 | Letter to the Editor; Correspondence | 248,262 |
-
-## Comparison
-
-| Method | Time |
-|--------|------|
-| FUSE mount (ocfl-mount) | 2m 07s |
-| DuckDB native S3 | 2m 17s |
-
-The FUSE mount is **slightly faster** than DuckDB's native S3 in this run,
-likely within normal variance. Both approaches are comparable in performance.
