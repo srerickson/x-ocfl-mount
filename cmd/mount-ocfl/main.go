@@ -43,7 +43,7 @@ func main() {
 
 	ctx := context.Background()
 
-	result, err := ocflfuse.NewRoot(ctx, storageRoot, objectID, *versionFlag)
+	result, err := ocflfuse.NewObjectFS(ctx, storageRoot, objectID, *versionFlag)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}

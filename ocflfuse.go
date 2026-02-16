@@ -1,6 +1,6 @@
 // Package ocflfuse provides a read-only FUSE filesystem for OCFL objects.
 //
-// The primary entry point is [NewRoot], which resolves an OCFL object version
+// The primary entry point is [NewObjectFS], which resolves an OCFL object version
 // and returns an [fs.InodeEmbedder] suitable for use with [fs.Mount].
 package ocflfuse
 
@@ -42,12 +42,12 @@ type ObjectFS struct {
 	Info Info
 }
 
-// NewRoot resolves an OCFL object version and returns a FUSE root node.
+// NewObjectFS resolves an OCFL object version and returns a FUSE root node.
 //
 // storageRoot is an S3 URI (s3://bucket/prefix) or a local filesystem path.
 // objectID is the OCFL object identifier. version is the version to mount
 // (e.g. "v1", "v2"); pass "" for the head/latest version.
-func NewRoot(ctx context.Context, storageRoot, objectID, version string) (*ObjectFS, error) {
+func NewObjectFS(ctx context.Context, storageRoot, objectID, version string) (*ObjectFS, error) {
 	if strings.HasPrefix(storageRoot, "s3://") {
 		return newS3Root(ctx, storageRoot, objectID, version)
 	}

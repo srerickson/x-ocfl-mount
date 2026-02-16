@@ -35,10 +35,10 @@ func mountForTest(t *testing.T, root fs.InodeEmbedder) string {
 	return mountpoint
 }
 
-func TestNewRoot(t *testing.T) {
+func TestNewObjectFS(t *testing.T) {
 	ctx := context.Background()
 
-	result, err := NewRoot(ctx, testStoreRoot, testObjectID, "")
+	result, err := NewObjectFS(ctx, testStoreRoot, testObjectID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,10 +77,10 @@ func TestNewRoot(t *testing.T) {
 	}
 }
 
-func TestNewRootWithVersion(t *testing.T) {
+func TestNewObjectFSWithVersion(t *testing.T) {
 	ctx := context.Background()
 
-	result, err := NewRoot(ctx, testStoreRoot, testObjectID, "v1")
+	result, err := NewObjectFS(ctx, testStoreRoot, testObjectID, "v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,20 +102,20 @@ func TestResolveVersionErrors(t *testing.T) {
 	ctx := context.Background()
 
 	// Invalid version
-	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, "abc"); err == nil {
+	if _, err := NewObjectFS(ctx, testStoreRoot, testObjectID, "abc"); err == nil {
 		t.Error("expected error for invalid version")
 	}
 
 	// Non-existent version
-	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, "v99"); err == nil {
+	if _, err := NewObjectFS(ctx, testStoreRoot, testObjectID, "v99"); err == nil {
 		t.Error("expected error for non-existent version")
 	}
 
 	// Valid
-	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, "v1"); err != nil {
+	if _, err := NewObjectFS(ctx, testStoreRoot, testObjectID, "v1"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, ""); err != nil {
+	if _, err := NewObjectFS(ctx, testStoreRoot, testObjectID, ""); err != nil {
 		t.Errorf("unexpected error for HEAD: %v", err)
 	}
 }
