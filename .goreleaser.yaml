@@ -1,0 +1,27 @@
+version: 2
+
+builds:
+  - id: mount-ocfl
+    main: ./cmd/mount-ocfl
+    binary: mount-ocfl
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: mount-ocfl
+    builds:
+      - mount-ocfl
+    format: tar.gz
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
