@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -50,7 +51,7 @@ type ocflDir struct {
 var _ = (fs.NodeGetattrer)((*ocflDir)(nil))
 
 func (d *ocflDir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | syscall.S_IFDIR
+	out.Mode = 0555 | syscall.S_IFDIR
 	return 0
 }
 
@@ -83,31 +84,40 @@ type s3File struct {
 	s3Client *s3.Client
 	bucket   string
 	s3Key    string
+	sizeOnce sync.Once
 	size     int64
-	sizeOK   bool
+	sizeErr  error
 }
 
 var _ = (fs.NodeGetattrer)((*s3File)(nil))
 var _ = (fs.NodeOpener)((*s3File)(nil))
 var _ = (fs.NodeReader)((*s3File)(nil))
 
-func (f *s3File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	if !f.sizeOK {
+func (f *s3File) fetchSize(ctx context.Context) (int64, error) {
+	f.sizeOnce.Do(func() {
 		resp, err := f.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 			Bucket: &f.bucket,
 			Key:    &f.s3Key,
 		})
 		if err != nil {
-			log.Printf("HeadObject error for %s: %v", f.s3Key, err)
-			return syscall.EIO
+			f.sizeErr = err
+			return
 		}
 		if resp.ContentLength != nil {
 			f.size = *resp.ContentLength
 		}
-		f.sizeOK = true
+	})
+	return f.size, f.sizeErr
+}
+
+func (f *s3File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	size, err := f.fetchSize(ctx)
+	if err != nil {
+		log.Printf("HeadObject error for %s: %v", f.s3Key, err)
+		return syscall.EIO
 	}
-	out.Mode = 0644 | syscall.S_IFREG
-	out.Size = uint64(f.size)
+	out.Mode = 0444 | syscall.S_IFREG
+	out.Size = uint64(size)
 	return 0
 }
 
@@ -161,7 +171,6 @@ type localFile struct {
 
 var _ = (fs.NodeGetattrer)((*localFile)(nil))
 var _ = (fs.NodeOpener)((*localFile)(nil))
-var _ = (fs.NodeReader)((*localFile)(nil))
 
 func (f *localFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	info, err := os.Stat(f.path)
@@ -175,21 +184,35 @@ func (f *localFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Att
 }
 
 func (f *localFile) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	return nil, fuse.FOPEN_KEEP_CACHE, 0
-}
-
-func (f *localFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	file, err := os.Open(f.path)
+	fh, err := os.Open(f.path)
 	if err != nil {
 		log.Printf("open error for %s: %v", f.path, err)
-		return nil, syscall.EIO
+		return nil, 0, syscall.EIO
 	}
-	defer file.Close()
+	return &localFileHandle{file: fh}, fuse.FOPEN_KEEP_CACHE, 0
+}
 
-	n, err := file.ReadAt(dest, off)
+// localFileHandle holds an open file descriptor for a local file.
+type localFileHandle struct {
+	file *os.File
+}
+
+var _ = (fs.FileReader)((*localFileHandle)(nil))
+var _ = (fs.FileReleaser)((*localFileHandle)(nil))
+
+func (fh *localFileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	n, err := fh.file.ReadAt(dest, off)
 	if err != nil && err != io.EOF {
-		log.Printf("read error for %s: %v", f.path, err)
+		log.Printf("read error for %s: %v", fh.file.Name(), err)
 		return nil, syscall.EIO
 	}
 	return fuse.ReadResultData(dest[:n]), 0
+}
+
+func (fh *localFileHandle) Release(ctx context.Context) syscall.Errno {
+	if err := fh.file.Close(); err != nil {
+		log.Printf("close error for %s: %v", fh.file.Name(), err)
+		return syscall.EIO
+	}
+	return 0
 }

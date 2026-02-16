@@ -48,11 +48,17 @@ func main() {
 
 	ctx := context.Background()
 
-	var fuseRoot fs.InodeEmbedder
+	var (
+		fuseRoot fs.InodeEmbedder
+		err      error
+	)
 	if strings.HasPrefix(storageRoot, "s3://") {
-		fuseRoot = mountS3(ctx, storageRoot, objectID, *versionFlag)
+		fuseRoot, err = mountS3(ctx, storageRoot, objectID, *versionFlag)
 	} else {
-		fuseRoot = mountLocal(ctx, storageRoot, objectID, *versionFlag)
+		fuseRoot, err = mountLocal(ctx, storageRoot, objectID, *versionFlag)
+	}
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	// Create mountpoint if it doesn't exist
@@ -62,9 +68,10 @@ func main() {
 
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
-			FsName: "ocfl-" + path.Base(objectID),
-			Name:   "ocfl",
-			Debug:  *debug,
+			FsName:  "ocfl-" + path.Base(objectID),
+			Name:    "ocfl",
+			Debug:   *debug,
+			Options: []string{"ro"},
 		},
 	}
 
@@ -91,7 +98,7 @@ func main() {
 }
 
 // resolveVersion parses a version flag and returns the OCFL object version.
-func resolveVersion(obj *ocfl.Object, versionFlag string) *ocfl.ObjectVersion {
+func resolveVersion(obj *ocfl.Object, versionFlag string) (*ocfl.ObjectVersion, error) {
 	vnum := 0 // HEAD
 	if versionFlag != "" {
 		v := versionFlag
@@ -100,19 +107,20 @@ func resolveVersion(obj *ocfl.Object, versionFlag string) *ocfl.ObjectVersion {
 		}
 		var n int
 		if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 1 {
-			log.Fatalf("Invalid version %q", versionFlag)
+			return nil, fmt.Errorf("invalid version %q", versionFlag)
 		}
 		vnum = n
 	}
 	ver := obj.Version(vnum)
 	if ver == nil {
-		log.Fatalf("Version not found")
+		return nil, fmt.Errorf("version not found")
 	}
-	return ver
+	return ver, nil
 }
 
 // buildFileMap builds the logical path -> content path mapping for an object version.
-func buildFileMap(obj *ocfl.Object, ver *ocfl.ObjectVersion) map[string]string {
+// Content paths are relative to the FS root (e.g. "objPath/v1/content/file.txt").
+func buildFileMap(obj *ocfl.Object, ver *ocfl.ObjectVersion) (map[string]string, error) {
 	state := ver.State()
 	manifest := obj.Manifest()
 	objPath := obj.Path()
@@ -121,87 +129,91 @@ func buildFileMap(obj *ocfl.Object, ver *ocfl.ObjectVersion) map[string]string {
 	for logicalPath, digest := range state.Paths() {
 		contentPaths := manifest[digest]
 		if len(contentPaths) == 0 {
-			log.Fatalf("Missing manifest entry for digest %s", digest)
+			return nil, fmt.Errorf("missing manifest entry for digest %s", digest)
 		}
 		files[logicalPath] = objPath + "/" + contentPaths[0]
 	}
-	return files
+	return files, nil
 }
 
-func mountS3(ctx context.Context, storageRoot, objectID, versionFlag string) fs.InodeEmbedder {
+func mountS3(ctx context.Context, storageRoot, objectID, versionFlag string) (fs.InodeEmbedder, error) {
 	// Parse s3://bucket/prefix
 	after := strings.TrimPrefix(storageRoot, "s3://")
 	bucket, prefix, _ := strings.Cut(after, "/")
 
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		log.Fatalf("Failed to load AWS config: %v", err)
+		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 	s3Client := s3.NewFromConfig(cfg)
 
 	fsys := ocfls3.NewBucketFS(s3Client, bucket)
 	root, err := ocfl.NewRoot(ctx, fsys, prefix)
 	if err != nil {
-		log.Fatalf("Failed to open OCFL root: %v", err)
+		return nil, fmt.Errorf("opening OCFL root: %w", err)
 	}
 	log.Printf("Opened OCFL root (spec %s, layout %v)", root.Spec(), root.Layout())
 
 	obj, err := root.NewObject(ctx, objectID, ocfl.ObjectMustExist())
 	if err != nil {
-		log.Fatalf("Failed to load OCFL object: %v", err)
+		return nil, fmt.Errorf("loading OCFL object: %w", err)
 	}
 
-	ver := resolveVersion(obj, versionFlag)
-	files := buildFileMap(obj, ver)
+	ver, err := resolveVersion(obj, versionFlag)
+	if err != nil {
+		return nil, err
+	}
+	files, err := buildFileMap(obj, ver)
+	if err != nil {
+		return nil, err
+	}
 	log.Printf("OCFL object %q version %s: %d files", obj.ID(), ver.VNum(), len(files))
 
 	return &s3Root{
 		s3Client: s3Client,
 		bucket:   bucket,
 		files:    files,
-	}
+	}, nil
 }
 
-func mountLocal(ctx context.Context, storageRoot, objectID, versionFlag string) fs.InodeEmbedder {
+func mountLocal(ctx context.Context, storageRoot, objectID, versionFlag string) (fs.InodeEmbedder, error) {
 	absRoot, err := filepath.Abs(storageRoot)
 	if err != nil {
-		log.Fatalf("Failed to resolve path: %v", err)
+		return nil, fmt.Errorf("resolving path: %w", err)
 	}
 
 	fsys, err := ocfllocal.NewFS(absRoot)
 	if err != nil {
-		log.Fatalf("Failed to open local FS: %v", err)
+		return nil, fmt.Errorf("opening local FS: %w", err)
 	}
 
 	root, err := ocfl.NewRoot(ctx, fsys, ".")
 	if err != nil {
-		log.Fatalf("Failed to open OCFL root: %v", err)
+		return nil, fmt.Errorf("opening OCFL root: %w", err)
 	}
 	log.Printf("Opened OCFL root (spec %s, layout %v)", root.Spec(), root.Layout())
 
 	obj, err := root.NewObject(ctx, objectID, ocfl.ObjectMustExist())
 	if err != nil {
-		log.Fatalf("Failed to load OCFL object: %v", err)
+		return nil, fmt.Errorf("loading OCFL object: %w", err)
 	}
 
-	ver := resolveVersion(obj, versionFlag)
+	ver, err := resolveVersion(obj, versionFlag)
+	if err != nil {
+		return nil, err
+	}
+	relFiles, err := buildFileMap(obj, ver)
+	if err != nil {
+		return nil, err
+	}
 
-	// Build logical path -> absolute file path mapping
-	state := ver.State()
-	manifest := obj.Manifest()
-	objPath := obj.Path()
-
-	files := make(map[string]string, state.NumPaths())
-	for logicalPath, digest := range state.Paths() {
-		contentPaths := manifest[digest]
-		if len(contentPaths) == 0 {
-			log.Fatalf("Missing manifest entry for digest %s", digest)
-		}
-		// Build absolute path: storageRoot / objPath / contentPath
-		files[logicalPath] = filepath.Join(absRoot, filepath.FromSlash(objPath+"/"+contentPaths[0]))
+	// Convert relative content paths to absolute paths on disk
+	files := make(map[string]string, len(relFiles))
+	for logicalPath, relPath := range relFiles {
+		files[logicalPath] = filepath.Join(absRoot, filepath.FromSlash(relPath))
 	}
 
 	log.Printf("OCFL object %q version %s: %d files", obj.ID(), ver.VNum(), len(files))
 
-	return &localRoot{files: files}
+	return &localRoot{files: files}, nil
 }
