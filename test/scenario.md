@@ -24,11 +24,11 @@ mkdir -p /tmp/ocfl-object
 ls /tmp/ocfl-object/hive/
 ```
 
-Expect hive-partitioned parquet files (e.g. `type=.../` subdirectories).
+Expect hive-partitioned parquet files with `pub_name=.../year=.../data.parquet` structure.
 
 ## Test: Count Records by Type
 
-Using DuckDB, time a query that counts the number of records grouped by the `type` partition column.
+Using DuckDB, time a query that counts the number of records grouped by the `type` column.
 
 ```bash
 time duckdb -c "
@@ -38,6 +38,27 @@ time duckdb -c "
   ORDER BY record_count DESC;
 "
 ```
+
+### Results (2026-02-16)
+
+- **250 files** mounted from OCFL object
+- **30 distinct types**, **~25.3M total records**
+- **Query time: 2m 7s** (wall clock)
+
+Top types by record count:
+
+| Type | Count |
+|------|-------|
+| Feature; Article | 12,413,867 |
+| Advertisement | 4,331,654 |
+| Classified Advertisement; Advertisement | 1,884,158 |
+| Front Page/Cover Story | 1,588,812 |
+| General Information | 1,522,331 |
+| News | 662,900 |
+| Stock Quote | 630,576 |
+| Editorial; Commentary | 598,970 |
+| Obituary | 314,692 |
+| Letter to the Editor; Correspondence | 248,262 |
 
 ## Teardown
 
