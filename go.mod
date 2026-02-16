@@ -1,4 +1,4 @@
-module github.com/srerickson/x-ocfl-mount
+module github.com/srerickson/ocfl-fuse
 
 go 1.24.4
 
