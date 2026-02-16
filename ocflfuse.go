@@ -33,9 +33,9 @@ type Info struct {
 	Layout   string
 }
 
-// Result is returned by NewRoot and contains the FUSE root node
-// along with metadata about the resolved OCFL object.
-type Result struct {
+// ObjectFS is a resolved OCFL object version ready to be mounted as a
+// FUSE filesystem.
+type ObjectFS struct {
 	// Root is the FUSE inode tree root, ready to pass to fs.Mount.
 	Root fs.InodeEmbedder
 	// Info describes the resolved OCFL object and version.
@@ -47,7 +47,7 @@ type Result struct {
 // storageRoot is an S3 URI (s3://bucket/prefix) or a local filesystem path.
 // objectID is the OCFL object identifier. version is the version to mount
 // (e.g. "v1", "v2"); pass "" for the head/latest version.
-func NewRoot(ctx context.Context, storageRoot, objectID, version string) (*Result, error) {
+func NewRoot(ctx context.Context, storageRoot, objectID, version string) (*ObjectFS, error) {
 	if strings.HasPrefix(storageRoot, "s3://") {
 		return newS3Root(ctx, storageRoot, objectID, version)
 	}
@@ -99,7 +99,7 @@ func layoutString(root *ocfl.Root) string {
 	return ""
 }
 
-func newS3Root(ctx context.Context, storageRoot, objectID, versionFlag string) (*Result, error) {
+func newS3Root(ctx context.Context, storageRoot, objectID, versionFlag string) (*ObjectFS, error) {
 	after := strings.TrimPrefix(storageRoot, "s3://")
 	bucket, prefix, _ := strings.Cut(after, "/")
 
@@ -129,7 +129,7 @@ func newS3Root(ctx context.Context, storageRoot, objectID, versionFlag string) (
 		return nil, err
 	}
 
-	return &Result{
+	return &ObjectFS{
 		Root: &s3Root{
 			s3Client: s3Client,
 			bucket:   bucket,
@@ -145,7 +145,7 @@ func newS3Root(ctx context.Context, storageRoot, objectID, versionFlag string) (
 	}, nil
 }
 
-func newLocalRoot(ctx context.Context, storageRoot, objectID, versionFlag string) (*Result, error) {
+func newLocalRoot(ctx context.Context, storageRoot, objectID, versionFlag string) (*ObjectFS, error) {
 	absRoot, err := filepath.Abs(storageRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolving path: %w", err)
@@ -181,7 +181,7 @@ func newLocalRoot(ctx context.Context, storageRoot, objectID, versionFlag string
 		files[logicalPath] = filepath.Join(absRoot, filepath.FromSlash(relPath))
 	}
 
-	return &Result{
+	return &ObjectFS{
 		Root: &localRoot{files: files},
 		Info: Info{
 			ObjectID:  obj.ID(),
