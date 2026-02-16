@@ -39,15 +39,7 @@ unzip -o /tmp/duckdb.zip -d /usr/local/bin/
 
 ### AWS credentials
 
-Obtain temporary STS credentials:
-
-```bash
-export DREAM_TOKEN=<token>
-curl -X POST -H "Dreamlab-Data-Token: $DREAM_TOKEN" \
-  https://data-test.dreamlab.ucsb.edu/user/sts-credential
-```
-
-Configure for the AWS SDK:
+Configure AWS credentials for the SDK:
 
 ```bash
 mkdir -p ~/.aws
