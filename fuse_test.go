@@ -1,4 +1,4 @@
-package main
+package ocflfuse
 
 import (
 	"context"
@@ -8,15 +8,12 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	ocfl "github.com/srerickson/ocfl-go"
-	ocfllocal "github.com/srerickson/ocfl-go/fs/local"
 )
 
 const testStoreRoot = "testdata/good-stores/reg-extension-dir-root"
 const testObjectID = "ark:123/abc"
 
 // mountForTest mounts a FUSE root at a temp directory and registers cleanup.
-// Returns the mountpoint path.
 func mountForTest(t *testing.T, root fs.InodeEmbedder) string {
 	t.Helper()
 	mountpoint := t.TempDir()
@@ -38,64 +35,26 @@ func mountForTest(t *testing.T, root fs.InodeEmbedder) string {
 	return mountpoint
 }
 
-func TestLocalMount(t *testing.T) {
+func TestNewRoot(t *testing.T) {
 	ctx := context.Background()
 
-	absRoot, err := filepath.Abs(testStoreRoot)
+	result, err := NewRoot(ctx, testStoreRoot, testObjectID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	fsys, err := ocfllocal.NewFS(absRoot)
-	if err != nil {
-		t.Fatal(err)
+	if result.Info.ObjectID != testObjectID {
+		t.Errorf("got object ID %q, want %q", result.Info.ObjectID, testObjectID)
 	}
-
-	root, err := ocfl.NewRoot(ctx, fsys, ".")
-	if err != nil {
-		t.Fatal(err)
+	if result.Info.FileCount == 0 {
+		t.Fatal("expected files")
 	}
+	t.Logf("object %q version %s: %d files (spec %s, layout %s)",
+		result.Info.ObjectID, result.Info.Version, result.Info.FileCount,
+		result.Info.RootSpec, result.Info.Layout)
 
-	if root.Layout() == nil {
-		t.Fatal("expected layout to be detected")
-	}
-	t.Logf("OCFL root: spec=%s layout=%v", root.Spec(), root.Layout())
+	mountpoint := mountForTest(t, result.Root)
 
-	obj, err := root.NewObject(ctx, testObjectID, ocfl.ObjectMustExist())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ver := obj.Version(0) // HEAD
-	if ver == nil {
-		t.Fatal("no HEAD version")
-	}
-
-	// Build the file map with absolute paths
-	state := ver.State()
-	manifest := obj.Manifest()
-	objPath := obj.Path()
-
-	files := make(map[string]string, state.NumPaths())
-	for logicalPath, digest := range state.Paths() {
-		contentPaths := manifest[digest]
-		if len(contentPaths) == 0 {
-			t.Fatalf("missing manifest entry for digest %s", digest)
-		}
-		files[logicalPath] = filepath.Join(absRoot, filepath.FromSlash(objPath+"/"+contentPaths[0]))
-	}
-
-	if len(files) == 0 {
-		t.Fatal("no files in version state")
-	}
-	t.Logf("object %q version %s: %d files", obj.ID(), ver.VNum(), len(files))
-	for lp, cp := range files {
-		t.Logf("  %s -> %s", lp, cp)
-	}
-
-	mountpoint := mountForTest(t, &localRoot{files: files})
-
-	// Verify we can read the mounted file
 	data, err := os.ReadFile(filepath.Join(mountpoint, "a_file.txt"))
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +65,6 @@ func TestLocalMount(t *testing.T) {
 		t.Errorf("got %q, want %q", string(data), expected)
 	}
 
-	// Verify directory listing
 	entries, err := os.ReadDir(mountpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -119,36 +77,15 @@ func TestLocalMount(t *testing.T) {
 	}
 }
 
-func TestMountLocal(t *testing.T) {
+func TestNewRootWithVersion(t *testing.T) {
 	ctx := context.Background()
 
-	fuseRoot, err := mountLocal(ctx, testStoreRoot, testObjectID, "")
+	result, err := NewRoot(ctx, testStoreRoot, testObjectID, "v1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	mountpoint := mountForTest(t, fuseRoot)
-
-	data, err := os.ReadFile(filepath.Join(mountpoint, "a_file.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expected := "Hello! I am a file.\n"
-	if string(data) != expected {
-		t.Errorf("got %q, want %q", string(data), expected)
-	}
-}
-
-func TestMountLocalWithVersion(t *testing.T) {
-	ctx := context.Background()
-
-	fuseRoot, err := mountLocal(ctx, testStoreRoot, testObjectID, "v1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mountpoint := mountForTest(t, fuseRoot)
+	mountpoint := mountForTest(t, result.Root)
 
 	data, err := os.ReadFile(filepath.Join(mountpoint, "a_file.txt"))
 	if err != nil {
@@ -164,38 +101,21 @@ func TestMountLocalWithVersion(t *testing.T) {
 func TestResolveVersionErrors(t *testing.T) {
 	ctx := context.Background()
 
-	absRoot, err := filepath.Abs(testStoreRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fsys, err := ocfllocal.NewFS(absRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := ocfl.NewRoot(ctx, fsys, ".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj, err := root.NewObject(ctx, testObjectID, ocfl.ObjectMustExist())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Invalid version string
-	if _, err := resolveVersion(obj, "abc"); err == nil {
+	// Invalid version
+	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, "abc"); err == nil {
 		t.Error("expected error for invalid version")
 	}
 
 	// Non-existent version
-	if _, err := resolveVersion(obj, "v99"); err == nil {
+	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, "v99"); err == nil {
 		t.Error("expected error for non-existent version")
 	}
 
 	// Valid
-	if _, err := resolveVersion(obj, "v1"); err != nil {
+	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, "v1"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if _, err := resolveVersion(obj, ""); err != nil {
+	if _, err := NewRoot(ctx, testStoreRoot, testObjectID, ""); err != nil {
 		t.Errorf("unexpected error for HEAD: %v", err)
 	}
 }

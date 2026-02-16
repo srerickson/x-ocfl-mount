@@ -1,13 +1,30 @@
-# ocfl-mount
+# ocfl-fuse
 
 > **Note:** This is AI-generated code not intended for general use.
 
-A Go CLI tool that mounts an OCFL object as a read-only FUSE filesystem. Supports both S3 and local storage roots.
+A Go library and CLI tool that mounts an OCFL object as a read-only FUSE filesystem. Supports both S3 and local storage roots.
 
-## Usage
+## Library Usage
+
+The `ocflfuse` package exports a single entry point, `NewRoot`, which resolves an OCFL object version and returns a FUSE root node:
+
+```go
+import (
+    ocflfuse "github.com/srerickson/ocfl-fuse"
+    "github.com/hanwen/go-fuse/v2/fs"
+)
+
+result, err := ocflfuse.NewRoot(ctx, "s3://bucket/prefix", "my-object-id", "v1")
+// result.Root is an fs.InodeEmbedder for use with fs.Mount
+// result.Info has metadata (ObjectID, Version, FileCount, etc.)
+
+server, err := fs.Mount(mountpoint, result.Root, opts)
+```
+
+## CLI Usage
 
 ```
-ocfl-mount [options] <storage-root> <object-id> <mountpoint>
+mount-ocfl [options] <storage-root> <object-id> <mountpoint>
 ```
 
 **Arguments:**
@@ -25,10 +42,10 @@ ocfl-mount [options] <storage-root> <object-id> <mountpoint>
 
 ```bash
 # Mount latest version from a local OCFL storage root
-./ocfl-mount /data/ocfl-root my-object-id /mnt/ocfl
+./mount-ocfl /data/ocfl-root my-object-id /mnt/ocfl
 
 # Mount specific version
-./ocfl-mount -version v3 /data/ocfl-root my-object-id /mnt/ocfl
+./mount-ocfl -version v3 /data/ocfl-root my-object-id /mnt/ocfl
 
 # Unmount
 fusermount -u /mnt/ocfl
@@ -42,10 +59,10 @@ export AWS_SECRET_ACCESS_KEY=...
 export AWS_REGION=us-west-2
 
 # Mount latest version from S3
-./ocfl-mount s3://mybucket/ocfl-root my-object-id /mnt/ocfl
+./mount-ocfl s3://mybucket/ocfl-root my-object-id /mnt/ocfl
 
 # Mount specific version
-./ocfl-mount -version v3 s3://mybucket/ocfl-root my-object-id /mnt/ocfl
+./mount-ocfl -version v3 s3://mybucket/ocfl-root my-object-id /mnt/ocfl
 
 # Unmount
 fusermount -u /mnt/ocfl
@@ -62,13 +79,13 @@ fusermount -u /mnt/ocfl
 ## Building
 
 ```bash
-go build -o ocfl-mount .
+go build -o mount-ocfl ./cmd/mount-ocfl
 ```
 
 ## Testing
 
 ```bash
-go test -v
+go test -v ./...
 ```
 
 Tests use the [reg-extension-dir-root](https://github.com/srerickson/ocfl-go/tree/main/testdata/store-fixtures/1.0/good-stores/reg-extension-dir-root) fixture from ocfl-go.
